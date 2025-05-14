@@ -1,0 +1,68 @@
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from surprise import Dataset, Reader, SVD
+from surprise.model_selection import train_test_split
+
+# Load movie metadata (simulate or use real dataset)
+movies = pd.DataFrame({
+    'movieId': [1, 2, 3, 4],
+    'title': ['Inception', 'The Matrix', 'Interstellar', 'The Godfather'],
+    'genres': ['Sci-Fi Thriller', 'Action Sci-Fi', 'Sci-Fi Drama', 'Crime Drama']
+})
+
+# Load user ratings
+ratings = pd.DataFrame({
+    'userId': [1, 1, 2, 2, 3],
+    'movieId': [1, 2, 2, 3, 4],
+    'rating': [5, 4, 5, 3, 4]
+})
+
+# --- Content-Based Filtering ---
+def content_recommendations(movie_title, movies_df):
+    tfidf = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = tfidf.fit_transform(movies_df['genres'])
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+    indices = pd.Series(movies_df.index, index=movies_df['title']).drop_duplicates()
+    idx = indices[movie_title]
+
+    sim_scores = list(enumerate(cosine_sim[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    movie_indices = [i[0] for i in sim_scores[1:3]]
+
+    return movies_df['title'].iloc[movie_indices]
+
+# --- Collaborative Filtering ---
+def train_cf_model(ratings_df):
+    reader = Reader(rating_scale=(1, 5))
+    data = Dataset.load_from_df(ratings_df[['userId', 'movieId', 'rating']], reader)
+    trainset, _ = train_test_split(data, test_size=0.2)
+    model = SVD()
+    model.fit(trainset)
+    return model
+
+def cf_recommendations(user_id, model, movies_df, ratings_df, top_n=2):
+    watched = ratings_df[ratings_df['userId'] == user_id]['movieId']
+    all_movie_ids = set(movies_df['movieId']) - set(watched)
+    
+    predictions = [(movie_id, model.predict(user_id, movie_id).est) for movie_id in all_movie_ids]
+    predictions.sort(key=lambda x: x[1], reverse=True)
+    top_movies = [x[0] for x in predictions[:top_n]]
+    
+    return movies_df[movies_df['movieId'].isin(top_movies)]
+
+# --- AI Matchmaking Engine ---
+def hybrid_recommend(user_id, liked_movie_title):
+    cf_model = train_cf_model(ratings)
+    cf_recs = cf_recommendations(user_id, cf_model, movies, ratings)
+    cb_recs = content_recommendations(liked_movie_title, movies)
+    
+    hybrid = pd.concat([cf_recs, movies[movies['title'].isin(cb_recs)]])
+    return hybrid.drop_duplicates()
+
+# Example Usage
+user_input_id = 1
+liked_movie = 'Inception'
+print("Personalized Recommendations:")
+print(hybrid_recommend(user_input_id, liked_movie))
